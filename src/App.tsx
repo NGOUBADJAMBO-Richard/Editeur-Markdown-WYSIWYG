@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOMServer from "react-dom/server";
 import {
   AlignmentType,
@@ -46,6 +46,24 @@ const message: string = 'Hello Markdown';
 console.log(message);
 \`\`\`
 `;
+
+const THEME_STORAGE_KEY = "markdown-editor-theme";
+type ThemeMode = "light" | "dark";
+
+function getPreferredTheme(): ThemeMode {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+
+  const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  if (savedTheme === "light" || savedTheme === "dark") {
+    return savedTheme;
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
 
 function wrapSelection(
   text: string,
@@ -172,21 +190,41 @@ function MarkdownContent({ markdown }: { markdown: string }) {
   );
 }
 
-const EXPORT_PAGE_STYLE = `
+function getExportPageStyle(theme: ThemeMode) {
+  const isDark = theme === "dark";
+  const pageBackground = isDark ? "#020617" : "#f8fafc";
+  const pageAccent = isDark
+    ? "rgba(56, 189, 248, 0.12)"
+    : "rgba(59, 130, 246, 0.12)";
+  const textPrimary = isDark ? "#e2e8f0" : "#111827";
+  const textSecondary = isDark ? "#cbd5e1" : "#475569";
+  const surface = isDark ? "rgba(15, 23, 42, 0.92)" : "white";
+  const surfaceBorder = isDark ? "rgba(148, 163, 184, 0.18)" : "#e2e8f0";
+  const codeBackground = isDark ? "#020617" : "#0f172a";
+  const codeForeground = "#e2e8f0";
+
+  return `
+  :root {
+    color-scheme: ${theme};
+  }
   body {
     font-family: Inter, system-ui, sans-serif;
     line-height: 1.7;
     margin: 0;
     padding: 2rem;
-    color: #111827;
-    background: #f8fafc;
+    color: ${textPrimary};
+    background:
+      radial-gradient(circle at top left, ${pageAccent}, transparent 30%),
+      ${pageBackground};
   }
   .content {
     max-width: 900px;
     margin: 0 auto;
-    background: white;
+    background: ${surface};
+    color: ${textPrimary};
     padding: 2rem;
     border-radius: 1rem;
+    border: 1px solid ${surfaceBorder};
     box-shadow: 0 20px 60px rgba(15, 23, 42, 0.08);
   }
   h1, h2, h3, h4, h5, h6 { line-height: 1.2; }
@@ -194,14 +232,14 @@ const EXPORT_PAGE_STYLE = `
     padding: 1rem;
     overflow: auto;
     border-radius: 0.75rem;
-    background: #0f172a;
-    color: #e2e8f0;
+    background: ${codeBackground};
+    color: ${codeForeground};
   }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   blockquote {
-    border-left: 4px solid #cbd5e1;
+    border-left: 4px solid ${surfaceBorder};
     padding-left: 1rem;
-    color: #475569;
+    color: ${textSecondary};
     margin-left: 0;
   }
   table {
@@ -209,25 +247,29 @@ const EXPORT_PAGE_STYLE = `
     border-collapse: collapse;
   }
   th, td {
-    border: 1px solid #cbd5e1;
+    border: 1px solid ${surfaceBorder};
     padding: 0.75rem;
+  }
+  a {
+    color: ${isDark ? "#60a5fa" : "#2563eb"};
   }
   img {
     max-width: 100%;
     border-radius: 0.75rem;
   }
 `;
+}
 
-function buildExportDocumentHtml(contentHtml: string) {
+function buildExportDocumentHtml(contentHtml: string, theme: ThemeMode) {
   return `<!doctype html>
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Export Markdown</title>
-    <style>${EXPORT_PAGE_STYLE}</style>
+    <style>${getExportPageStyle(theme)}</style>
   </head>
-  <body>
+  <body data-theme="${theme}">
     <main class="content">
       ${contentHtml}
     </main>
@@ -470,13 +512,13 @@ function buildWordDocumentFromHtml(contentHtml: string) {
   return blocks;
 }
 
-function createPdfSurface(contentHtml: string) {
+function createPdfSurface(contentHtml: string, theme: ThemeMode) {
   const wrapper = document.createElement("div");
   wrapper.style.position = "fixed";
   wrapper.style.left = "-10000px";
   wrapper.style.top = "0";
   wrapper.style.width = "900px";
-  wrapper.innerHTML = `<style>${EXPORT_PAGE_STYLE}</style><main class="content">${contentHtml}</main>`;
+  wrapper.innerHTML = `<style>${getExportPageStyle(theme)}</style><main class="content">${contentHtml}</main>`;
   document.body.appendChild(wrapper);
 
   return wrapper;
@@ -486,6 +528,12 @@ export default function App() {
   const [markdown, setMarkdown] = useState(INITIAL_MARKDOWN);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [characterCount, setCharacterCount] = useState(INITIAL_MARKDOWN.length);
+  const [theme, setTheme] = useState<ThemeMode>(getPreferredTheme);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = event.target.value;
@@ -692,7 +740,7 @@ export default function App() {
     const contentHtml = ReactDOMServer.renderToStaticMarkup(
       <MarkdownContent markdown={markdown} />,
     );
-    const documentHtml = buildExportDocumentHtml(contentHtml);
+    const documentHtml = buildExportDocumentHtml(contentHtml, theme);
 
     downloadBlob(
       new Blob([documentHtml], { type: "text/html;charset=utf-8" }),
@@ -723,7 +771,7 @@ export default function App() {
     const contentHtml = ReactDOMServer.renderToStaticMarkup(
       <MarkdownContent markdown={markdown} />,
     );
-    const wrapper = createPdfSurface(contentHtml);
+    const wrapper = createPdfSurface(contentHtml, theme);
 
     try {
       const pdf = new jsPDF("p", "pt", "a4");
@@ -771,6 +819,8 @@ export default function App() {
     [markdown],
   );
 
+  const themeLabel = theme === "dark" ? "Mode clair" : "Mode sombre";
+
   return (
     <div className="app-shell">
       <header className="hero">
@@ -788,6 +838,14 @@ export default function App() {
           </div>
         </div>
         <div className="hero-actions">
+          <button
+            className="theme-toggle"
+            type="button"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            aria-pressed={theme === "dark"}
+          >
+            {themeLabel}
+          </button>
           <div className="export-group" aria-label="Exports">
             <button
               className="export-button"
@@ -895,6 +953,17 @@ export default function App() {
           </article>
         </section>
       </main>
+
+      <footer className="app-footer">
+        <span>Conçu par</span>
+        <a
+          href="https://code-wave-eight.vercel.app/"
+          target="_blank"
+          rel="noreferrer"
+        >
+          M.G.N CodeWave
+        </a>
+      </footer>
     </div>
   );
 }
